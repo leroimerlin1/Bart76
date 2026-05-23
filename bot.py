@@ -2,6 +2,7 @@ import logging
 import json
 import os
 import asyncio
+from datetime import time
 from telegram import (
    Update,
    InlineKeyboardButton,
@@ -12,7 +13,8 @@ from telegram.ext import (
    ApplicationBuilder,
    CommandHandler,
    CallbackQueryHandler,
-   ContextTypes
+   ContextTypes,
+   JobQueue
 )
 
 # =============================================================
@@ -30,6 +32,14 @@ IMAGE_WELCOME = "chat.jpg"
 ADMIN_ID = 8313494819
 
 USERS_FILE = "users.json"
+
+DAILY_MESSAGE = """✅ Les commandes sont ouvertes 📦
+
+📍 Meet-Up Dispo ✅
+
+🚚 Livraison Dispo ✅
+
+Fait /start pour relancer le bot 🤖"""
 
 INFO_TEXT = """Information de Dry.Coffee76
 
@@ -79,7 +89,6 @@ def load_users() -> dict:
         try:
             with open(USERS_FILE, "r") as f:
                 data = json.load(f)
-                # Compatibilité avec l'ancien format (liste d'IDs)
                 if isinstance(data, list):
                     return {str(uid): {"first_name": "?", "username": "?"} for uid in data}
                 return data
@@ -145,6 +154,31 @@ async def send_welcome_menu(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
            text="Bienvenue chez Bart Coffee76 🔥\n\nChoisis une option :",
            reply_markup=get_main_menu_keyboard()
        )
+
+
+# =============================================================
+# JOB QUOTIDIEN 11H
+# =============================================================
+
+async def daily_message_job(context: ContextTypes.DEFAULT_TYPE):
+    users = load_users()
+    if not users:
+        logger.info("Aucun utilisateur pour le message quotidien.")
+        return
+
+    sent = 0
+    failed = 0
+
+    for chat_id in users:
+        try:
+            await context.bot.send_message(chat_id=int(chat_id), text=DAILY_MESSAGE)
+            sent += 1
+        except Exception as e:
+            logger.warning(f"Impossible d'envoyer à {chat_id} : {e}")
+            failed += 1
+        await asyncio.sleep(0.05)
+
+    logger.info(f"Message quotidien envoyé → {sent} succès, {failed} échecs")
 
 
 # =============================================================
@@ -285,10 +319,19 @@ def main():
        .token(TOKEN) \
        .build()
 
+   # ── Handlers ──
    app.add_handler(CommandHandler("start", start))
    app.add_handler(CommandHandler("broadcast", broadcast))
    app.add_handler(CommandHandler("users", users_list))
    app.add_handler(CallbackQueryHandler(button_handler))
+
+   # ── Job quotidien à 11h00 (heure de Paris) ──
+   job_queue = app.job_queue
+   job_queue.run_daily(
+       daily_message_job,
+       time=time(hour=11, minute=0, second=0),
+       name="daily_open_message"
+   )
 
    print("Bot démarré → Bart Coffee76  |  Image : chat.jpg")
    app.run_polling(allowed_updates=Update.ALL_TYPES)

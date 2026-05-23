@@ -71,24 +71,31 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # =============================================================
-# GESTION DES UTILISATEURS (stockage JSON)
+# GESTION DES UTILISATEURS
 # =============================================================
 
-def load_users() -> set:
-   if os.path.exists(USERS_FILE):
-       try:
-           with open(USERS_FILE, "r") as f:
-               return set(json.load(f))
-       except Exception:
-           return set()
-   return set()
+def load_users() -> dict:
+    if os.path.exists(USERS_FILE):
+        try:
+            with open(USERS_FILE, "r") as f:
+                data = json.load(f)
+                # Compatibilité avec l'ancien format (liste d'IDs)
+                if isinstance(data, list):
+                    return {str(uid): {"first_name": "?", "username": "?"} for uid in data}
+                return data
+        except Exception:
+            return {}
+    return {}
 
 
-def save_user(user_id: int):
-   users = load_users()
-   users.add(user_id)
-   with open(USERS_FILE, "w") as f:
-       json.dump(list(users), f)
+def save_user(user_id: int, first_name: str = "?", username: str = None):
+    users = load_users()
+    users[str(user_id)] = {
+        "first_name": first_name,
+        "username": username or "?"
+    }
+    with open(USERS_FILE, "w") as f:
+        json.dump(users, f, ensure_ascii=False, indent=2)
 
 
 # =============================================================
@@ -149,7 +156,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
    if not user:
        return
 
-   save_user(user.id)
+   save_user(user.id, first_name=user.first_name or "?", username=user.username)
    await send_welcome_menu(update.effective_chat.id, context)
 
 
@@ -171,7 +178,7 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
    for chat_id in users:
        try:
-           await context.bot.send_message(chat_id=chat_id, text=BROADCAST_TEXT)
+           await context.bot.send_message(chat_id=int(chat_id), text=BROADCAST_TEXT)
            sent += 1
        except Exception as e:
            logger.warning(f"Impossible d'envoyer à {chat_id} : {e}")
@@ -185,13 +192,48 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
    )
 
 
+async def users_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not user or user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Tu n'as pas la permission d'utiliser cette commande.")
+        return
+
+    users = load_users()
+    if not users:
+        await update.message.reply_text("⚠️ Aucun utilisateur enregistré pour l'instant.")
+        return
+
+    lines = [f"👥 *Utilisateurs enregistrés : {len(users)}*\n"]
+    for i, (uid, info) in enumerate(users.items(), 1):
+        first_name = info.get("first_name", "?")
+        username = info.get("username", "?")
+        uname_display = f"@{username}" if username != "?" else "pas de @"
+        lines.append(f"{i}. {first_name} ({uname_display}) — `{uid}`")
+
+    message = "\n".join(lines)
+    if len(message) <= 4096:
+        await update.message.reply_text(message, parse_mode="Markdown")
+    else:
+        chunks = []
+        current = ""
+        for line in lines:
+            if len(current) + len(line) + 1 > 4096:
+                chunks.append(current)
+                current = line
+            else:
+                current += "\n" + line
+        if current:
+            chunks.append(current)
+        for chunk in chunks:
+            await update.message.reply_text(chunk, parse_mode="Markdown")
+
+
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
    query = update.callback_query
    await query.answer()
 
    data = query.data
 
-   # ──────────────── RETOUR ────────────────
    if data == "back":
        try:
            await query.message.delete()
@@ -200,7 +242,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
        await send_welcome_menu(query.message.chat_id, context)
        return
 
-   # ──────────────── Contact ────────────────
    if data == "contact":
        try:
            await query.message.delete()
@@ -219,7 +260,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
        )
        return
 
-   # ──────────────── Informations ────────────────
    if data == "info":
        try:
            await query.message.delete()
@@ -247,6 +287,7 @@ def main():
 
    app.add_handler(CommandHandler("start", start))
    app.add_handler(CommandHandler("broadcast", broadcast))
+   app.add_handler(CommandHandler("users", users_list))
    app.add_handler(CallbackQueryHandler(button_handler))
 
    print("Bot démarré → Bart Coffee76  |  Image : chat.jpg")

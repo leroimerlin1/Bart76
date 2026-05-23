@@ -19,7 +19,7 @@ from telegram.ext import (
 # CONFIGURATION
 # =============================================================
 
-TOKEN = "8586174802:AAEJ294yeBBufP9O29wJOHHTdFoLciQtmgE"
+TOKEN = "8744963419:AAFcngIdV_pF3pITHbAOiydfFRlO5Tl0qCc"
 
 CHANNEL_ID = -1003798159205          # ID du canal (avec -100...)
 CHANNEL_LINK = "https://t.me/+xkLrkV6xQBQ2OTQ0"
